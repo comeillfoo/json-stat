@@ -22,14 +22,27 @@ mod parser {
     }
 
     fn accept(stream: &str, expected: char) -> Result<&str, &str> {
-        if stream[0] == expected {
+        if ! stream.is_empty() && stream[0] == expected {
             return Ok(&stream[1..]);
         }
         Err(stream)
     }
 
+    fn just_accept(stream: &str) -> Result<&str, &str> {
+        Ok(stream)
+    }
+
     fn accept_cb(expected: char) -> impl FnOnce(&str) -> Result<&str, &str> {
         |stream: &str| accept(stream, expected)
+    }
+
+    fn accept_ignoring_case(stream: &str, expected: char) -> Result<&str, &str> {
+        accept(stream, expected.to_ascii_lowercase())
+            .or(accept(stream, expected.to_ascii_uppercase()))
+    }
+
+    fn accept_ignoring_case_cb(expected: char) -> impl FnOnce(&str) -> Result<&str, &str> {
+        |stream: &str| accept_ignoring_case(stream, expected)
     }
 
     fn accept_whitespace(stream: &str) -> Result<&str, &str> {
@@ -78,8 +91,46 @@ mod parser {
         accept_nonzero(stream).or_else(accept_cb('0'))
     }
 
+    fn accept_digits(stream: &str) -> Result<&str, &str> {
+        let digit = accept_digit(stream);
+        if digit.is_err() {
+            return digit;
+        }
+        digit.and_then(accept_digits)
+            .or_else(|advanced_stream| Ok(advanced_stream))
+    }
+
+    fn accept_exponent(stream: &str) -> Result<&str, &str> {
+        accept_ignoring_case(stream, 'e')
+            .and_then(|advanced_stream| accept(advanced_stream, '+')
+                .or_else(accept_cb('-'))
+                .or(Ok(advanced_stream)))
+            .and_then(accept_digits)
+    }
+
+    fn accept_fraction(stream: &str) -> Result<&str, &str> {
+        accept(stream, '.')
+            .and_then(accept_digits)
+    }
+
+    fn accept_integer(stream: &str) -> Result<&str, &str> {
+        accept(stream, '-')
+            .or(Ok(stream))
+            .and_then(accept_cb('0'))
+            .or_else(|advanced_stream| accept_nonzero(advanced_stream)
+                .and_then(accept_digits)
+                .or_else(just_accept))
+    }
+
     fn accept_number(stream: &str) -> Result<&str, &str> {
-        Err(stream)
+        let integer = accept_integer(stream);
+        if integer.is_err() {
+            return integer;
+        }
+        integer.and_then(accept_fraction)
+            .or_else(just_accept)
+            .and_then(accept_exponent)
+            .or_else(just_accept)
     }
 
     fn accept_values(stream: &str) -> Result<&str, &str> {
@@ -100,12 +151,77 @@ mod parser {
             .and_then(accept_cb(']'))
     }
 
+    fn accept_key_value(stream: &str) -> Result<&str, &str> {
+        accept_whitespace(stream)
+            .and_then(accept_string)
+            .and_then(accept_whitespace)
+            .and_then(accept_cb(':'))
+            .and_then(accept_value)
+    }
+
+    fn accept_key_values(stream: &str) -> Result<&str, &str> {
+        let first_key_value = accept_key_value(stream);
+        if first_key_value.is_err() {
+            return first_key_value;
+        }
+        first_key_value
+            .and_then(accept_cb(','))
+            .and_then(accept_key_values)
+            .or_else(|advanced_stream| Ok(advanced_stream))
+    }
+
     fn accept_object(stream: &str) -> Result<&str, &str> {
-        Err(stream)
+        accept(stream, '{')
+            .and_then(|advanced_stream| accept_key_values(advanced_stream)
+                .or_else(accept_whitespace))
+            .and_then(accept_cb('}'))
+    }
+
+    fn accept_hex(stream: &str) -> Result<&str, &str> {
+        accept_digit(stream)
+            .or_else(accept_ignoring_case_cb('a'))
+            .or_else(accept_ignoring_case_cb('b'))
+            .or_else(accept_ignoring_case_cb('c'))
+            .or_else(accept_ignoring_case_cb('d'))
+            .or_else(accept_ignoring_case_cb('e'))
+            .or_else(accept_ignoring_case_cb('f'))
+    }
+
+    fn accept_unicode(stream: &str) -> Result<&str, &str> {
+        accept(stream, 'u')
+            .and_then(accept_hex)
+            .and_then(accept_hex)
+            .and_then(accept_hex)
+            .and_then(accept_hex)
+    }
+
+    fn accept_control_characters(stream: &str) -> Result<&str, &str> {
+        accept(stream, '\\')
+            .and_then(|advanced_stream| accept(advanced_stream, '\\')
+                .or_else(accept_cb('/'))
+                .or_else(accept_cb('b'))
+                .or_else(accept_cb('b'))
+                .or_else(accept_cb('n'))
+                .or_else(accept_cb('r'))
+                .or_else(accept_cb('t'))
+                .or_else(accept_unicode))
+    }
+
+    fn accept_symbol(stream: &str) -> Result<&str, &str> {
+        // TODO: also accept any codepoint except " and \
+        accept_control_characters(stream)
+    }
+
+    fn accept_symbols(stream: &str) -> Result<&str, &str> {
+        accept_symbol(stream)
+            .and_then(accept_symbols)
+            .or_else(|advanced_stream| Ok(advanced_stream))
     }
 
     fn accept_string(stream: &str) -> Result<&str, &str> {
-        Err(stream)
+        accept(stream, '"')
+            .and_then(accept_symbols)
+            .and_then(accept_cb('"'))
     }
 
     fn accept_value(stream: &str) -> Result<&str, &str> {
