@@ -7,7 +7,7 @@ pub struct ParseError {
     pub msg: String
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum JsonValue {
     STRING(String),
     NUMBER(f64),
@@ -34,10 +34,10 @@ impl Clone for JsonValue {
     }
 }
 
-struct JsonFragment<'a> {
-    stream: &'a str,
-    raw: Vec<char>,
-    value: JsonValue
+pub struct JsonFragment<'a> {
+    pub stream: &'a str,
+    pub raw: Vec<char>,
+    pub value: JsonValue
 }
 
 fn accept_common(mut frag: JsonFragment, expected: char, should_ignore: bool) -> Result<JsonFragment, JsonFragment> {
@@ -85,15 +85,20 @@ fn accept_ignoring_case_cb(expected: char) -> impl FnOnce(JsonFragment) -> Resul
     move |frag: JsonFragment| accept_ignoring_case(frag, expected)
 }
 
-fn accept_whitespace(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
+fn accept_whitespaces(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
     accept_delimiter(frag, ' ')
         .or_else(accept_delimiter_cb('\n'))
         .or_else(accept_delimiter_cb('\r'))
         .or_else(accept_delimiter_cb('\t'))
+}
+
+pub fn accept_whitespace(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
+    accept_whitespaces(frag)
+        .and_then(accept_whitespace)
         .or_else(just_accept)
 }
 
-fn accept_true(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
+pub fn accept_true(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
     let r_frag = accept(frag, 't')
         .and_then(accept_cb('r'))
         .and_then(accept_cb('u'))
@@ -105,7 +110,7 @@ fn accept_true(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
     })
 }
 
-fn accept_false(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
+pub fn accept_false(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
     let r_frag = accept(frag, 'f')
         .and_then(accept_cb('a'))
         .and_then(accept_cb('l'))
@@ -118,7 +123,7 @@ fn accept_false(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
     })
 }
 
-fn accept_null(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
+pub fn accept_null(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
     let r_frag = accept(frag, 'n')
         .and_then(accept_cb('u'))
         .and_then(accept_cb('l'))
@@ -177,7 +182,7 @@ fn accept_integer(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
             .or_else(just_accept))
 }
 
-fn accept_number(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
+pub fn accept_number(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
     let frag_integer = accept_integer(JsonFragment {
         stream: frag.stream,
         raw: frag.raw.clone(),
@@ -218,7 +223,7 @@ fn accept_values(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
     Err(frag)
 }
 
-fn accept_array(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
+pub fn accept_array(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
     accept_delimiter(frag, '[')
         // .and_then(accept_whitespace)
         .and_then(|r_frag| accept_values(JsonFragment {
@@ -275,7 +280,7 @@ fn accept_key_values(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
     Err(frag)
 }
 
-fn accept_object(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
+pub fn accept_object(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
     accept_delimiter(frag, '{')
         // .and_then(accept_whitespace)
         .and_then(|r_frag| accept_key_values(JsonFragment {
@@ -309,7 +314,7 @@ fn accept_control_characters(frag: JsonFragment) -> Result<JsonFragment, JsonFra
         .and_then(|r_frag| accept(r_frag, '\\')
             .or_else(accept_cb('/'))
             .or_else(accept_cb('b'))
-            .or_else(accept_cb('b'))
+            .or_else(accept_cb('f'))
             .or_else(accept_cb('n'))
             .or_else(accept_cb('r'))
             .or_else(accept_cb('t'))
@@ -333,7 +338,7 @@ fn accept_symbols(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
         .or_else(|r_frag| Ok(r_frag))
 }
 
-fn accept_string(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
+pub fn accept_string(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
     let frag_string = accept_delimiter(frag, '"')
         .and_then(accept_symbols)
         .and_then(accept_delimiter_cb('"'))?;
@@ -345,7 +350,7 @@ fn accept_string(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
     })
 }
 
-fn accept_value(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
+pub fn accept_value(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
     accept_whitespace(frag)
         .and_then(accept_string)
         .or_else(accept_number)
