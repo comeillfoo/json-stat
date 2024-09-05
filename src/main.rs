@@ -15,8 +15,10 @@ Arguments:
 fn _main(files: &[String]) -> Result<(), std::io::Error> {
     for file in files {
         match parser::single_json(file) {
-            Ok(is_valid) => println!("{} is {}valid JSON",
-                file, if is_valid { "" } else { "not " }),
+            Ok(maybe_value) => match maybe_value {
+                Some(value) => println!("{} is valid JSON: {:?}", file, value),
+                None => println!("{} is not valid JSON", file)
+            },
             Err(error) => println!("{} has error at ({}, {}): {}",
                 file, error.row, error.col, error.msg)
         }
