@@ -311,7 +311,8 @@ fn accept_unicode(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
 
 fn accept_control_characters(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
     accept(frag, '\\')
-        .and_then(|r_frag| accept(r_frag, '\\')
+        .and_then(|r_frag| accept(r_frag, '"')
+            .or_else(accept_cb('\\'))
             .or_else(accept_cb('/'))
             .or_else(accept_cb('b'))
             .or_else(accept_cb('f'))

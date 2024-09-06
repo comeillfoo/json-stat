@@ -2,6 +2,7 @@ pub mod parser;
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use crate::parser::*;
 
     #[test]
@@ -134,6 +135,39 @@ mod tests {
                 assert!(frag.stream.is_empty());
                 assert_eq!(frag.value, expected);
             }
+        }
+    }
+
+    #[test]
+    fn check_object() {
+        let stream = "{
+    \"3.18\": {
+        \"3.18.1\": {
+            \"CVE-2014-8559\": {
+                \"cmt_msg\": \"crypto: prefix module autoloading with \\\"crypto-\\\"\", 
+                \"cmt_id\": \"679829c2e50332832c2e85b12ec851a423ad9892\"
+            }
+        }
+    }
+}";
+        let result = accept_object(JsonFragment {
+            stream,
+            raw: vec![],
+            value: JsonValue::NULL
+        });
+        assert!(result.is_ok());
+        if let Ok(frag) = result {
+            assert!(frag.stream.is_empty());
+            assert_eq!(frag.value, JsonValue::OBJECT(HashMap::from([
+                ("3.18".to_string(), JsonValue::OBJECT(HashMap::from([
+                    ("3.18.1".to_string(), JsonValue::OBJECT(HashMap::from([
+                        ("CVE-2014-8559".to_string(), JsonValue::OBJECT(HashMap::from([
+                            ("cmt_msg".to_string(), JsonValue::STRING("crypto: prefix module autoloading with \\\"crypto-\\\"".to_string())),
+                            ("cmt_id".to_string(), JsonValue::STRING("679829c2e50332832c2e85b12ec851a423ad9892".to_string()))
+                        ])))
+                    ])))
+                ])))
+            ])));
         }
     }
 }
