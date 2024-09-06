@@ -170,8 +170,8 @@ fn accept_integer(jval: JsonValue) -> Result<JsonValue, JsonValue> {
 }
 
 pub fn accept_number(jval: JsonValue) -> Result<JsonValue, JsonValue> {
-    let jval_integer = accept_integer(jval.clone())?;
-    let _jval_number = accept_fraction(jval_integer)
+    let _jval_integer = accept_integer(JsonValue::NULL)?;
+    let _jval_number = accept_fraction(JsonValue::NULL)
         .or_else(just_accept)
         .and_then(accept_exponent)
         .or_else(just_accept)?;
@@ -188,8 +188,8 @@ pub fn accept_number(jval: JsonValue) -> Result<JsonValue, JsonValue> {
 }
 
 fn accept_values(jval: JsonValue) -> Result<JsonValue, JsonValue> {
-    if let JsonValue::ARRAY(mut arr) = jval.clone() {
-        let first_value = accept_value(jval)?;
+    if let JsonValue::ARRAY(mut arr) = jval {
+        let first_value = accept_value(JsonValue::NULL)?;
         arr.push(first_value);
         return accept_delimiter(JsonValue::ARRAY(arr), ',')
             .and_then(accept_values)
@@ -205,23 +205,23 @@ pub fn accept_array(jval: JsonValue) -> Result<JsonValue, JsonValue> {
 }
 
 fn accept_key_value(jval: JsonValue) -> Result<JsonValue, JsonValue> {
-    let key_jval = accept_whitespace(jval.clone())
+    let key_jval = accept_whitespace(JsonValue::NULL)
         .and_then(accept_string)
         .and_then(accept_whitespace)
         .and_then(accept_delimiter_cb(':'))?;
-    let value_jval = accept_value(jval.clone())?;
+    let value_jval = accept_value(JsonValue::NULL)?;
     if let JsonValue::STRING(key) = key_jval {
         return Ok(JsonValue::KEYVALUE((key, Box::new(value_jval))));
     }
     Err(jval)
 }
 
-fn accept_key_values(jval: JsonValue) -> Result<JsonValue, JsonValue> {
-    if let JsonValue::OBJECT(mut obj) = jval.clone() {
-        let first_key_value = accept_key_value(jval.clone())?;
+fn accept_key_values(mut jval: JsonValue) -> Result<JsonValue, JsonValue> {
+    if let JsonValue::OBJECT(ref mut obj) = jval {
+        let first_key_value = accept_key_value(JsonValue::NULL)?;
         if let JsonValue::KEYVALUE((key, value)) = first_key_value {
             obj.insert(key, value);
-            return accept_delimiter(JsonValue::OBJECT(obj), ',')
+            return accept_delimiter(jval, ',')
                 .and_then(accept_key_values)
                 .or_else(|r_frag| Ok(r_frag));
         }
