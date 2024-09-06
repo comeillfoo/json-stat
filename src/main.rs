@@ -1,14 +1,20 @@
-use std::env;
+use clap::{arg, Command};
+
 use json_stat::parser;
 
 
-fn usage(arg0: &String) -> Result<(), std::io::Error> {
-    println!("Usage: {} path-to-json [path-to-json]
-
-Arguments:
-  path-to-json    Path to JSON file
-", arg0);
-    Ok(())
+fn cli() -> Command {
+    Command::new("json-stat")
+        .about("Tool for verifying and analyzing JSON")
+        .subcommand_required(true)
+        .arg_required_else_help(true)
+        .allow_external_subcommands(true)
+        .subcommand(
+            Command::new("check")
+                .about("Verifies JSON file(s)")
+                .arg(arg!(<JSON> "Path to JSON file"))
+                .arg_required_else_help(true)
+        )
 }
 
 
@@ -28,11 +34,14 @@ fn _main(files: &[String]) -> Result<(), std::io::Error> {
 
 
 fn main() -> Result<(), std::io::Error> {
-    let argv: Vec<String> = env::args().collect();
-    let argc = argv.len();
-
-    match argv.len() {
-        1 => usage(&argv[0]),
-        _ => _main(&argv[1..argc])
+    let m = cli().get_matches();
+    match m.subcommand() {
+        Some(("check", sub_matches)) => if let Some(arg) = sub_matches.get_one::<String>("JSON") {
+            let argv = [arg.clone()];
+            _main(&argv)
+        } else {
+            Err(std::io::Error::from_raw_os_error(22))
+        },
+        _ => unreachable!()
     }
 }
