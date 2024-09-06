@@ -11,7 +11,7 @@ pub struct ParseError {
 pub enum JsonValue {
     STRING(String),
     NUMBER(f64),
-    OBJECT(HashMap<String, JsonValue>),
+    OBJECT(HashMap<String, Box<JsonValue>>),
     ARRAY(Vec<JsonValue>),
     TRUE,
     FALSE,
@@ -29,114 +29,101 @@ impl Clone for JsonValue {
             JsonValue::TRUE => JsonValue::TRUE,
             JsonValue::FALSE => JsonValue::FALSE,
             JsonValue::NULL => JsonValue::NULL,
-            JsonValue::KEYVALUE((key, value)) => JsonValue::KEYVALUE((key.clone(), Box::new((**value).clone()))),
+            JsonValue::KEYVALUE((key, value)) => JsonValue::KEYVALUE((key.clone(), Box::new((**value).clone())))
         }
     }
 }
 
-pub struct JsonFragment<'a> {
-    pub stream: &'a str,
-    pub raw: Vec<char>,
-    pub value: JsonValue
-}
+static mut CHAR_STREAM: &str = "";
+static mut RAW_CHARS: Vec<char> = vec![];
 
-fn accept_common(mut frag: JsonFragment, expected: char, should_ignore: bool) -> Result<JsonFragment, JsonFragment> {
-    match frag.stream.chars().next() {
+fn accept_common(jval: JsonValue, expected: char, should_ignore: bool) -> Result<JsonValue, JsonValue> {
+    let current = unsafe { CHAR_STREAM.chars().next() };
+    match current {
         Some(actual) => if actual == expected {
-            if ! should_ignore { frag.raw.push(expected); }
-            Ok(JsonFragment {
-                stream: &frag.stream[1..],
-                raw: frag.raw,
-                value: frag.value
-            })
+            unsafe {
+                if ! should_ignore {
+                    RAW_CHARS.push(expected);
+                }
+                CHAR_STREAM = &CHAR_STREAM[1..];
+            }
+            Ok(jval)
         } else {
-            Err(frag)
+            Err(jval)
         },
-        None => Err(frag)
+        None => Err(jval)
     }
 }
 
-fn accept(frag: JsonFragment, expected: char) -> Result<JsonFragment, JsonFragment> {
-    accept_common(frag, expected, false)
+fn accept(jval: JsonValue, expected: char) -> Result<JsonValue, JsonValue> {
+    accept_common(jval, expected, false)
 }
 
-fn accept_delimiter(frag: JsonFragment, expected: char) -> Result<JsonFragment, JsonFragment> {
-    accept_common(frag, expected, true)
+fn accept_delimiter(jval: JsonValue, expected: char) -> Result<JsonValue, JsonValue> {
+    accept_common(jval, expected, true)
 }
 
-fn just_accept(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
-    Ok(frag)
+fn just_accept(jval: JsonValue) -> Result<JsonValue, JsonValue> {
+    Ok(jval)
 }
 
-fn accept_cb(expected: char) -> impl FnOnce(JsonFragment) -> Result<JsonFragment, JsonFragment> {
-    move |frag: JsonFragment| accept(frag, expected)
+fn accept_cb(expected: char) -> impl FnOnce(JsonValue) -> Result<JsonValue, JsonValue> {
+    move |jval: JsonValue| accept(jval, expected)
 }
 
-fn accept_delimiter_cb(expected: char) -> impl FnOnce(JsonFragment) -> Result<JsonFragment, JsonFragment> {
-    move |frag: JsonFragment| accept_delimiter(frag, expected)
+fn accept_delimiter_cb(expected: char) -> impl FnOnce(JsonValue) -> Result<JsonValue, JsonValue> {
+    move |jval: JsonValue| accept_delimiter(jval, expected)
 }
 
-fn accept_ignoring_case(frag: JsonFragment, expected: char) -> Result<JsonFragment, JsonFragment> {
-    accept(frag, expected.to_ascii_lowercase())
+fn accept_ignoring_case(jval: JsonValue, expected: char) -> Result<JsonValue, JsonValue> {
+    accept(jval, expected.to_ascii_lowercase())
         .or_else(accept_cb(expected.to_ascii_uppercase()))
 }
 
-fn accept_ignoring_case_cb(expected: char) -> impl FnOnce(JsonFragment) -> Result<JsonFragment, JsonFragment> {
-    move |frag: JsonFragment| accept_ignoring_case(frag, expected)
+fn accept_ignoring_case_cb(expected: char) -> impl FnOnce(JsonValue) -> Result<JsonValue, JsonValue> {
+    move |jval: JsonValue| accept_ignoring_case(jval, expected)
 }
 
-fn accept_whitespaces(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
-    accept_delimiter(frag, ' ')
+fn accept_whitespaces(jval: JsonValue) -> Result<JsonValue, JsonValue> {
+    accept_delimiter(jval, ' ')
         .or_else(accept_delimiter_cb('\n'))
         .or_else(accept_delimiter_cb('\r'))
         .or_else(accept_delimiter_cb('\t'))
 }
 
-pub fn accept_whitespace(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
-    accept_whitespaces(frag)
+pub fn accept_whitespace(jval: JsonValue) -> Result<JsonValue, JsonValue> {
+    accept_whitespaces(jval)
         .and_then(accept_whitespace)
         .or_else(just_accept)
 }
 
-pub fn accept_true(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
-    let r_frag = accept(frag, 't')
+pub fn accept_true(jval: JsonValue) -> Result<JsonValue, JsonValue> {
+    accept(jval, 't')
         .and_then(accept_cb('r'))
         .and_then(accept_cb('u'))
-        .and_then(accept_cb('e'))?;
-    Ok(JsonFragment {
-        stream: r_frag.stream,
-        raw: vec![],
-        value: JsonValue::TRUE
-    })
+        .and_then(accept_cb('e'))
+        .and(Ok(JsonValue::TRUE))
 }
 
-pub fn accept_false(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
-    let r_frag = accept(frag, 'f')
+pub fn accept_false(jval: JsonValue) -> Result<JsonValue, JsonValue> {
+    accept(jval, 'f')
         .and_then(accept_cb('a'))
         .and_then(accept_cb('l'))
         .and_then(accept_cb('s'))
-        .and_then(accept_cb('e'))?;
-    Ok(JsonFragment {
-        stream: r_frag.stream,
-        raw: vec![],
-        value: JsonValue::FALSE
-    })
+        .and_then(accept_cb('e'))
+        .and(Ok(JsonValue::FALSE))
 }
 
-pub fn accept_null(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
-    let r_frag = accept(frag, 'n')
+pub fn accept_null(jval: JsonValue) -> Result<JsonValue, JsonValue> {
+    accept(jval, 'n')
         .and_then(accept_cb('u'))
         .and_then(accept_cb('l'))
-        .and_then(accept_cb('l'))?;
-    return Ok(JsonFragment {
-        stream: r_frag.stream,
-        raw: vec![],
-        value: JsonValue::NULL
-    })
+        .and_then(accept_cb('l'))
+        .and(Ok(JsonValue::NULL))
 }
 
-fn accept_nonzero(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
-    accept(frag, '1')
+fn accept_nonzero(jval: JsonValue) -> Result<JsonValue, JsonValue> {
+    accept(jval, '1')
         .or_else(accept_cb('2'))
         .or_else(accept_cb('3'))
         .or_else(accept_cb('4'))
@@ -147,12 +134,12 @@ fn accept_nonzero(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
         .or_else(accept_cb('9'))
 }
 
-fn accept_digit(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
-    accept_nonzero(frag).or_else(accept_cb('0'))
+fn accept_digit(jval: JsonValue) -> Result<JsonValue, JsonValue> {
+    accept_nonzero(jval).or_else(accept_cb('0'))
 }
 
-fn accept_digits(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
-    let digit = accept_digit(frag);
+fn accept_digits(jval: JsonValue) -> Result<JsonValue, JsonValue> {
+    let digit = accept_digit(jval);
     if digit.is_err() {
         return digit;
     }
@@ -160,139 +147,96 @@ fn accept_digits(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
         .or_else(just_accept)
 }
 
-fn accept_exponent(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
-    accept_ignoring_case(frag, 'e')
-        .and_then(|r_frag| accept(r_frag, '+')
+fn accept_exponent(jval: JsonValue) -> Result<JsonValue, JsonValue> {
+    accept_ignoring_case(jval, 'e')
+        .and_then(|r_jval| accept(r_jval, '+')
             .or_else(accept_cb('-'))
             .or_else(just_accept))
         .and_then(accept_digits)
 }
 
-fn accept_fraction(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
-    accept(frag, '.')
+fn accept_fraction(jval: JsonValue) -> Result<JsonValue, JsonValue> {
+    accept(jval, '.')
         .and_then(accept_digits)
 }
 
-fn accept_integer(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
-    accept(frag, '-')
+fn accept_integer(jval: JsonValue) -> Result<JsonValue, JsonValue> {
+    accept(jval, '-')
         .or_else(just_accept)
         .and_then(accept_cb('0'))
-        .or_else(|r_frag| accept_nonzero(r_frag)
+        .or_else(|r_jval| accept_nonzero(r_jval)
             .and_then(accept_digits)
             .or_else(just_accept))
 }
 
-pub fn accept_number(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
-    let frag_integer = accept_integer(JsonFragment {
-        stream: frag.stream,
-        raw: frag.raw.clone(),
-        value: frag.value.clone()
-    })?;
-    let frag_number = accept_fraction(frag_integer)
+pub fn accept_number(jval: JsonValue) -> Result<JsonValue, JsonValue> {
+    let jval_integer = accept_integer(jval.clone())?;
+    let _jval_number = accept_fraction(jval_integer)
         .or_else(just_accept)
         .and_then(accept_exponent)
         .or_else(just_accept)?;
-    match frag_number.raw
-                .into_iter()
-                .collect::<String>().parse::<f64>() {
-        Ok(number) => Ok(JsonFragment {
-            stream: frag_number.stream,
-            raw: vec![],
-            value: JsonValue::NUMBER(number)
-        }),
-        Err(_) => Err(frag)
+    let maybe_parsed = unsafe {
+        RAW_CHARS.iter().collect::<String>().parse::<f64>() };
+
+    match maybe_parsed {
+        Ok(number) => unsafe {
+            RAW_CHARS.clear();
+            Ok(JsonValue::NUMBER(number))
+        },
+        Err(_) => Err(jval)
     }
 }
 
-fn accept_values(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
-    let frag_value = frag.value.clone();
-    if let JsonValue::ARRAY(mut arr) = frag_value {
-        let first_value = accept_value(JsonFragment {
-            stream: frag.stream,
-            raw: frag.raw,
-            value: frag.value
-        })?;
-        arr.push(first_value.value);
-        return accept_delimiter(JsonFragment {
-            stream: first_value.stream,
-            raw: vec![],
-            value: JsonValue::ARRAY(arr)
-        }, ',').and_then(accept_values)
+fn accept_values(jval: JsonValue) -> Result<JsonValue, JsonValue> {
+    if let JsonValue::ARRAY(mut arr) = jval.clone() {
+        let first_value = accept_value(jval)?;
+        arr.push(first_value);
+        return accept_delimiter(JsonValue::ARRAY(arr), ',')
+            .and_then(accept_values)
             .or_else(just_accept);
     }
-    Err(frag)
+    Err(jval)
 }
 
-pub fn accept_array(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
-    accept_delimiter(frag, '[')
-        // .and_then(accept_whitespace)
-        .and_then(|r_frag| accept_values(JsonFragment {
-                stream: r_frag.stream,
-                raw: r_frag.raw,
-                value: JsonValue::ARRAY(vec![])
-        }))
+pub fn accept_array(jval: JsonValue) -> Result<JsonValue, JsonValue> {
+    accept_delimiter(jval, '[')
+        .and_then(|_r_jval| accept_values(JsonValue::ARRAY(vec![])))
         .and_then(accept_delimiter_cb(']'))
 }
 
-fn accept_key_value(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
-    let key_frag = accept_whitespace(JsonFragment {
-        stream: frag.stream,
-        raw: frag.raw.clone(),
-        value: frag.value.clone()
-    }).and_then(accept_string)
+fn accept_key_value(jval: JsonValue) -> Result<JsonValue, JsonValue> {
+    let key_jval = accept_whitespace(jval.clone())
+        .and_then(accept_string)
         .and_then(accept_whitespace)
         .and_then(accept_delimiter_cb(':'))?;
-    let value_frag = accept_value(JsonFragment {
-        stream: key_frag.stream,
-        raw: vec![],
-        value: frag.value.clone()
-    })?;
-    let key_frag_value = key_frag.value;
-    if let JsonValue::STRING(key) = key_frag_value {
-        return Ok(JsonFragment {
-            stream: value_frag.stream,
-            raw: value_frag.raw,
-            value: JsonValue::KEYVALUE((key, Box::new(value_frag.value)))
-        });
+    let value_jval = accept_value(jval.clone())?;
+    if let JsonValue::STRING(key) = key_jval {
+        return Ok(JsonValue::KEYVALUE((key, Box::new(value_jval))));
     }
-    Err(frag)
+    Err(jval)
 }
 
-fn accept_key_values(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
-    let frag_value = frag.value.clone();
-    if let JsonValue::OBJECT(mut obj) = frag_value.clone() {
-        let first_key_value = accept_key_value(JsonFragment {
-            stream: frag.stream,
-            raw: frag.raw.clone(),
-            value: frag_value
-        })?;
-
-        if let JsonValue::KEYVALUE((key, value)) = first_key_value.value {
-            obj.insert(key, *value);
-            return accept_delimiter(JsonFragment {
-                stream: first_key_value.stream,
-                raw: first_key_value.raw,
-                value: JsonValue::OBJECT(obj)
-            }, ',').and_then(accept_key_values)
+fn accept_key_values(jval: JsonValue) -> Result<JsonValue, JsonValue> {
+    if let JsonValue::OBJECT(mut obj) = jval.clone() {
+        let first_key_value = accept_key_value(jval.clone())?;
+        if let JsonValue::KEYVALUE((key, value)) = first_key_value {
+            obj.insert(key, value);
+            return accept_delimiter(JsonValue::OBJECT(obj), ',')
+                .and_then(accept_key_values)
                 .or_else(|r_frag| Ok(r_frag));
         }
     }
-    Err(frag)
+    Err(jval)
 }
 
-pub fn accept_object(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
-    accept_delimiter(frag, '{')
-        // .and_then(accept_whitespace)
-        .and_then(|r_frag| accept_key_values(JsonFragment {
-            stream: r_frag.stream,
-            raw: r_frag.raw,
-            value: JsonValue::OBJECT(HashMap::new())
-        }))
+pub fn accept_object(jval: JsonValue) -> Result<JsonValue, JsonValue> {
+    accept_delimiter(jval, '{')
+        .and_then(|_r_jval| accept_key_values(JsonValue::OBJECT(HashMap::new())))
         .and_then(accept_delimiter_cb('}'))
 }
 
-fn accept_hex(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
-    accept_digit(frag)
+fn accept_hex(jval: JsonValue) -> Result<JsonValue, JsonValue> {
+    accept_digit(jval)
         .or_else(accept_ignoring_case_cb('a'))
         .or_else(accept_ignoring_case_cb('b'))
         .or_else(accept_ignoring_case_cb('c'))
@@ -301,17 +245,17 @@ fn accept_hex(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
         .or_else(accept_ignoring_case_cb('f'))
 }
 
-fn accept_unicode(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
-    accept(frag, 'u')
+fn accept_unicode(jval: JsonValue) -> Result<JsonValue, JsonValue> {
+    accept(jval, 'u')
         .and_then(accept_hex)
         .and_then(accept_hex)
         .and_then(accept_hex)
         .and_then(accept_hex)
 }
 
-fn accept_control_characters(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
-    accept(frag, '\\')
-        .and_then(|r_frag| accept(r_frag, '"')
+fn accept_control_characters(jval: JsonValue) -> Result<JsonValue, JsonValue> {
+    accept(jval, '\\')
+        .and_then(|r_jval| accept(r_jval, '"')
             .or_else(accept_cb('\\'))
             .or_else(accept_cb('/'))
             .or_else(accept_cb('b'))
@@ -322,37 +266,37 @@ fn accept_control_characters(frag: JsonFragment) -> Result<JsonFragment, JsonFra
             .or_else(accept_unicode))
 }
 
-fn accept_symbol(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
-    match frag.stream.chars().next() {
+fn accept_symbol(jval: JsonValue) -> Result<JsonValue, JsonValue> {
+    let current = unsafe { CHAR_STREAM.chars().next() };
+    match current {
         Some(actual) => if actual != '"' && actual != '\\' {
-            accept(frag, actual)
+            accept(jval, actual)
         } else {
-            accept_control_characters(frag)
+            accept_control_characters(jval)
         },
-        None => Err(frag)
+        None => Err(jval)
     }
 }
 
-fn accept_symbols(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
-    accept_symbol(frag)
+fn accept_symbols(jval: JsonValue) -> Result<JsonValue, JsonValue> {
+    accept_symbol(jval)
         .and_then(accept_symbols)
-        .or_else(|r_frag| Ok(r_frag))
+        .or_else(|r_jval| Ok(r_jval))
 }
 
-pub fn accept_string(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
-    let frag_string = accept_delimiter(frag, '"')
+pub fn accept_string(jval: JsonValue) -> Result<JsonValue, JsonValue> {
+    let _jval_string = accept_delimiter(jval, '"')
         .and_then(accept_symbols)
         .and_then(accept_delimiter_cb('"'))?;
-    Ok(JsonFragment {
-        stream: frag_string.stream,
-        raw: vec![],
-        value: JsonValue::STRING(frag_string.raw
-            .into_iter().collect::<String>())
-    })
+    Ok(JsonValue::STRING(unsafe {
+        let res = RAW_CHARS.iter().collect::<String>();
+        RAW_CHARS.clear();
+        res
+    }))
 }
 
-pub fn accept_value(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
-    accept_whitespace(frag)
+pub fn accept_value(jval: JsonValue) -> Result<JsonValue, JsonValue> {
+    accept_whitespace(jval)
         .and_then(accept_string)
         .or_else(accept_number)
         .or_else(accept_object)
@@ -363,15 +307,21 @@ pub fn accept_value(frag: JsonFragment) -> Result<JsonFragment, JsonFragment> {
         .and_then(accept_whitespace)
 }
 
+pub fn prepare_environment(content: String) {
+    unsafe {
+        RAW_CHARS.clear();
+        CHAR_STREAM = Box::leak(content.into_boxed_str());
+    }
+}
+
 pub fn single_json(file: &String) -> Result<Option<JsonValue>, ParseError> {
     match fs::read_to_string(file) {
-        Ok(content) => match accept_value(JsonFragment {
-            stream: &content,
-            raw: vec![],
-            value: JsonValue::NULL
-        }) {
-            Ok(frag) => Ok(Some(frag.value)),
-            Err(_) => Ok(None)
+        Ok(content) => {
+            prepare_environment(content);
+            match accept_value(JsonValue::NULL) {
+                Ok(jval) => Ok(Some(jval)),
+                Err(_) => Ok(None)
+            }
         },
         Err(e) => Err(ParseError {
             row: 0,

@@ -7,40 +7,31 @@ mod tests {
 
     #[test]
     fn check_true_constant() {
-        let result = accept_true(JsonFragment {
-            stream: "true",
-            raw: vec![],
-            value: JsonValue::NULL
-        });
+        prepare_environment("true".to_string());
+        let result = accept_true(JsonValue::NULL);
         assert!(result.is_ok());
-        if let Ok(frag) = result {
-            assert_eq!(frag.value, JsonValue::TRUE);
+        if let Ok(jval) = result {
+            assert_eq!(jval, JsonValue::TRUE);
         }
     }
 
     #[test]
     fn check_false_constant() {
-        let result = accept_false(JsonFragment {
-            stream: "false",
-            raw: vec![],
-            value: JsonValue::NULL
-        });
+        prepare_environment("false".to_string());
+        let result = accept_false(JsonValue::NULL);
         assert!(result.is_ok());
-        if let Ok(frag) = result {
-            assert_eq!(frag.value, JsonValue::FALSE);
+        if let Ok(jval) = result {
+            assert_eq!(jval, JsonValue::FALSE);
         }
     }
 
     #[test]
     fn check_null_constant() {
-        let result = accept_null(JsonFragment {
-            stream: "null",
-            raw: vec![],
-            value: JsonValue::FALSE
-        });
+        prepare_environment("null".to_string());
+        let result = accept_null(JsonValue::NULL);
         assert!(result.is_ok());
-        if let Ok(frag) = result {
-            assert_eq!(frag.value, JsonValue::NULL);
+        if let Ok(jval) = result {
+            assert_eq!(jval, JsonValue::NULL);
         }
     }
 
@@ -54,14 +45,11 @@ mod tests {
         ];
         for expected in cases {
             let stream = format!("\"{}\"", expected);
-            let result = accept_string(JsonFragment {
-                stream: &stream[..],
-                raw: vec![],
-                value: JsonValue::NULL
-            });
+            prepare_environment(stream);
+            let result = accept_string(JsonValue::NULL);
             assert!(result.is_ok());
-            if let Ok(frag) = result {
-                assert_eq!(frag.value, JsonValue::STRING(expected.to_string()))
+            if let Ok(jval) = result {
+                assert_eq!(jval, JsonValue::STRING(expected.to_string()))
             }
         }
     }
@@ -81,14 +69,11 @@ mod tests {
         ];
         for expected in cases {
             let stream = format!("{}", expected);
-            let result = accept_number(JsonFragment {
-                stream: &stream[..],
-                raw: vec![],
-                value: JsonValue::NULL
-            });
+            prepare_environment(stream);
+            let result = accept_number(JsonValue::NULL);
             assert!(result.is_ok());
-            if let Ok(frag) = result {
-                assert_eq!(frag.value, JsonValue::NUMBER(expected));
+            if let Ok(jval) = result {
+                assert_eq!(jval, JsonValue::NUMBER(expected));
             }
         }
     }
@@ -104,16 +89,11 @@ mod tests {
             "\n\n\n\n\n\r\r\r\t\t\t    "
         ];
         for stream in cases {
-            let result = accept_whitespace(JsonFragment {
-                stream,
-                raw: vec![],
-                value: JsonValue::NULL
-            });
+            prepare_environment(stream.to_string());
+            let result = accept_whitespace(JsonValue::NULL);
             assert!(result.is_ok());
-            if let Ok(frag) = result {
-                assert!(frag.stream.is_empty());
-                assert!(frag.raw.is_empty());
-                assert_eq!(frag.value, JsonValue::NULL);
+            if let Ok(jval) = result {
+                assert_eq!(jval, JsonValue::NULL);
             }
         }
     }
@@ -122,18 +102,17 @@ mod tests {
     fn check_arrays() {
         let cases = [
             ("[1]", JsonValue::ARRAY(vec![JsonValue::NUMBER(1f64)])),
-            ("[ 1, 2, 3 ]", JsonValue::ARRAY(vec![JsonValue::NUMBER(1f64), JsonValue::NUMBER(2f64), JsonValue::NUMBER(3f64)]))
+            ("[ 1, 2, 3 ]", JsonValue::ARRAY(vec![
+                JsonValue::NUMBER(1f64),
+                JsonValue::NUMBER(2f64),
+                JsonValue::NUMBER(3f64)]))
         ];
         for (stream, expected) in cases {
-            let result = accept_array(JsonFragment {
-                stream,
-                raw: vec![],
-                value: JsonValue::NULL
-            });
+            prepare_environment(stream.to_string());
+            let result = accept_array(JsonValue::NULL);
             assert!(result.is_ok());
-            if let Ok(frag) = result {
-                assert!(frag.stream.is_empty());
-                assert_eq!(frag.value, expected);
+            if let Ok(jval) = result {
+                assert_eq!(jval, expected);
             }
         }
     }
@@ -149,24 +128,20 @@ mod tests {
             }
         }
     }
-}";
-        let result = accept_object(JsonFragment {
-            stream,
-            raw: vec![],
-            value: JsonValue::NULL
-        });
+}".to_string();
+        prepare_environment(stream);
+        let result = accept_object(JsonValue::NULL);
         assert!(result.is_ok());
-        if let Ok(frag) = result {
-            assert!(frag.stream.is_empty());
-            assert_eq!(frag.value, JsonValue::OBJECT(HashMap::from([
-                ("3.18".to_string(), JsonValue::OBJECT(HashMap::from([
-                    ("3.18.1".to_string(), JsonValue::OBJECT(HashMap::from([
-                        ("CVE-2014-8559".to_string(), JsonValue::OBJECT(HashMap::from([
-                            ("cmt_msg".to_string(), JsonValue::STRING("crypto: prefix module autoloading with \\\"crypto-\\\"".to_string())),
-                            ("cmt_id".to_string(), JsonValue::STRING("679829c2e50332832c2e85b12ec851a423ad9892".to_string()))
-                        ])))
-                    ])))
-                ])))
+        if let Ok(jval) = result {
+            assert_eq!(jval, JsonValue::OBJECT(HashMap::from([
+                ("3.18".to_string(), Box::new(JsonValue::OBJECT(HashMap::from([
+                    ("3.18.1".to_string(), Box::new(JsonValue::OBJECT(HashMap::from([
+                        ("CVE-2014-8559".to_string(), Box::new(JsonValue::OBJECT(HashMap::from([
+                            ("cmt_msg".to_string(), Box::new(JsonValue::STRING("crypto: prefix module autoloading with \\\"crypto-\\\"".to_string()))),
+                            ("cmt_id".to_string(), Box::new(JsonValue::STRING("679829c2e50332832c2e85b12ec851a423ad9892".to_string())))
+                        ]))))
+                    ]))))
+                ]))))
             ])));
         }
     }
