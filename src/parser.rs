@@ -19,21 +19,6 @@ pub enum JsonValue {
     KEYVALUE((String, Box<JsonValue>))
 }
 
-impl Clone for JsonValue {
-    fn clone(&self) -> Self {
-        match self {
-            JsonValue::STRING(line) => JsonValue::STRING(line.clone()),
-            JsonValue::NUMBER(num) => JsonValue::NUMBER(*num),
-            JsonValue::OBJECT(obj) => JsonValue::OBJECT(obj.clone()),
-            JsonValue::ARRAY(arr) => JsonValue::ARRAY(arr.clone()),
-            JsonValue::TRUE => JsonValue::TRUE,
-            JsonValue::FALSE => JsonValue::FALSE,
-            JsonValue::NULL => JsonValue::NULL,
-            JsonValue::KEYVALUE((key, value)) => JsonValue::KEYVALUE((key.clone(), Box::new((**value).clone())))
-        }
-    }
-}
-
 static mut CHAR_STREAM: &str = "";
 static mut RAW_CHARS: Vec<char> = vec![];
 
