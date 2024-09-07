@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs};
+use std::{cell::RefCell, collections::HashMap, fs};
 
 
 pub struct ParseError {
@@ -19,24 +19,40 @@ pub enum JsonValue {
     KEYVALUE((String, Box<JsonValue>))
 }
 
-static mut CHAR_STREAM: &str = "";
-static mut RAW_CHARS: Vec<char> = vec![];
+thread_local! {
+    static COLUMN: RefCell<usize> = RefCell::new(0);
+    static ROW: RefCell<usize> = RefCell::new(0);
+    static CHAR_STREAM: RefCell<&'static str> = RefCell::new("");
+    static RAW_CHARS: RefCell<Vec<char>> = RefCell::new(vec![]);
+}
+
+fn get_next_char() -> char {
+    let next = CHAR_STREAM.with(|rc| rc.borrow().chars().next());
+    if let Some(symbol) = next {
+        return symbol;
+    }
+    return '\0';
+}
 
 fn accept_common(jval: JsonValue, expected: char, should_ignore: bool) -> Result<JsonValue, JsonValue> {
-    let current = unsafe { CHAR_STREAM.chars().next() };
-    match current {
-        Some(actual) => if actual == expected {
-            unsafe {
-                if ! should_ignore {
-                    RAW_CHARS.push(expected);
-                }
-                CHAR_STREAM = &CHAR_STREAM[1..];
-            }
-            Ok(jval)
-        } else {
-            Err(jval)
-        },
-        None => Err(jval)
+    let actual = get_next_char();
+    if actual == '\0' {
+        return Err(jval);
+    }
+
+    if actual == expected {
+        COLUMN.with(|rc| { *rc.borrow_mut() += 1; });
+        if ! should_ignore {
+            RAW_CHARS.with(|rc| { rc.borrow_mut().push(expected); });
+        } else if actual == '\n' {
+            ROW.with(|rc| { *rc.borrow_mut() += 1; });
+            COLUMN.with(|rc| { *rc.borrow_mut() = 0; })
+        }
+        CHAR_STREAM.with(|rc| { rc.replace_with(|&mut old| &old[1..]); });
+
+        Ok(jval)
+    } else {
+        Err(jval)
     }
 }
 
@@ -160,12 +176,12 @@ pub fn accept_number(jval: JsonValue) -> Result<JsonValue, JsonValue> {
         .or_else(just_accept)
         .and_then(accept_exponent)
         .or_else(just_accept)?;
-    let maybe_parsed = unsafe {
-        RAW_CHARS.iter().collect::<String>().parse::<f64>() };
+    let maybe_parsed = RAW_CHARS.with(
+        |rc| rc.borrow().iter().collect::<String>().parse::<f64>());
 
     match maybe_parsed {
-        Ok(number) => unsafe {
-            RAW_CHARS.clear();
+        Ok(number) => {
+            RAW_CHARS.with(|rc| rc.borrow_mut().clear());
             Ok(JsonValue::NUMBER(number))
         },
         Err(_) => Err(jval)
@@ -252,14 +268,15 @@ fn accept_control_characters(jval: JsonValue) -> Result<JsonValue, JsonValue> {
 }
 
 fn accept_symbol(jval: JsonValue) -> Result<JsonValue, JsonValue> {
-    let current = unsafe { CHAR_STREAM.chars().next() };
-    match current {
-        Some(actual) => if actual != '"' && actual != '\\' {
-            accept(jval, actual)
-        } else {
-            accept_control_characters(jval)
-        },
-        None => Err(jval)
+    let actual = get_next_char();
+    if actual == '\0' {
+        return Err(jval);
+    }
+
+    if actual != '"' && actual != '\\' {
+        accept(jval, actual)
+    } else {
+        accept_control_characters(jval)
     }
 }
 
@@ -273,11 +290,9 @@ pub fn accept_string(jval: JsonValue) -> Result<JsonValue, JsonValue> {
     let _jval_string = accept_delimiter(jval, '"')
         .and_then(accept_symbols)
         .and_then(accept_delimiter_cb('"'))?;
-    Ok(JsonValue::STRING(unsafe {
-        let res = RAW_CHARS.iter().collect::<String>();
-        RAW_CHARS.clear();
-        res
-    }))
+    let res = RAW_CHARS.with(|rc| rc.borrow().iter().collect::<String>());
+    RAW_CHARS.with(|rc| rc.borrow_mut().clear());
+    Ok(JsonValue::STRING(res))
 }
 
 pub fn accept_value(jval: JsonValue) -> Result<JsonValue, JsonValue> {
@@ -293,10 +308,10 @@ pub fn accept_value(jval: JsonValue) -> Result<JsonValue, JsonValue> {
 }
 
 pub fn prepare_environment(content: String) {
-    unsafe {
-        RAW_CHARS.clear();
-        CHAR_STREAM = Box::leak(content.into_boxed_str());
-    }
+    COLUMN.with(|rc| { *rc.borrow_mut() = 0; });
+    ROW.with(|rc| { *rc.borrow_mut() = 0; });
+    RAW_CHARS.with(|rc| rc.borrow_mut().clear());
+    CHAR_STREAM.with(|rc| { rc.replace(Box::leak(content.into_boxed_str())); });
 }
 
 pub fn single_json(file: &String) -> Result<Option<JsonValue>, ParseError> {
@@ -305,13 +320,17 @@ pub fn single_json(file: &String) -> Result<Option<JsonValue>, ParseError> {
             prepare_environment(content);
             match accept_value(JsonValue::NULL) {
                 Ok(jval) => Ok(Some(jval)),
-                Err(_) => Ok(None)
+                Err(_) => Err(ParseError {
+                    row: ROW.with(|rc| *rc.borrow()),
+                    col: COLUMN.with(|rc| *rc.borrow()),
+                    msg: format!("unexpected symbol \'{}\'", get_next_char())
+                })
             }
         },
         Err(e) => Err(ParseError {
             row: 0,
             col: 0,
-            msg: format!("Unable to open file {}: {}", file, e.to_string())
+            msg: format!("unable to open/read file: {}", e.to_string())
         })
     }
 }

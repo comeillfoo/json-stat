@@ -12,36 +12,46 @@ fn cli() -> Command {
         .subcommand(
             Command::new("check")
                 .about("Verifies JSON file(s)")
-                .arg(arg!(<JSON> "Path to JSON file"))
+                .arg(arg!(<JSON>... "Path to JSON file"))
+                .arg_required_else_help(true)
+        )
+        .subcommand(
+            Command::new("stat")
+                .about("Analyzes JSON file(s)")
+                .arg(arg!(<JSON>... "Path to JSON file"))
                 .arg_required_else_help(true)
         )
 }
 
 
-fn _main(files: &[String]) -> Result<(), std::io::Error> {
+fn main() -> Result<(), std::io::Error> {
+    let (should_stat, files) = match cli().get_matches().subcommand() {
+        Some(("check", sub_matches)) => if let Some(argv) = sub_matches.get_many::<String>("JSON") {
+            Ok((false, argv.into_iter().map(String::clone).collect::<Vec<String>>()))
+        } else { Err(std::io::Error::from_raw_os_error(22)) },
+        Some(("stat", sub_matches)) => if let Some(argv) = sub_matches.get_many::<String>("JSON") {
+            Ok((true, argv.into_iter().map(String::clone).collect::<Vec<String>>()))
+        } else { Err(std::io::Error::from_raw_os_error(22)) },
+        _ => unreachable!()
+    }?;
+
     for file in files {
-        match parser::single_json(file) {
-            Ok(maybe_value) => match maybe_value {
-                Some(value) => println!("{} is valid JSON: {:?}", file, value),
-                None => println!("{} is not valid JSON", file)
-            },
-            Err(error) => println!("{} has error at ({}, {}): {}",
-                file, error.row, error.col, error.msg)
+        let maybe_json = match parser::single_json(&file) {
+            Ok(maybe_value) => Ok(maybe_value),
+            Err(error) => {
+                println!("\'{}\' has error at ({}, {}): {}", file, error.row, error.col, error.msg);
+                Err(std::io::Error::from_raw_os_error(22))
+            }
+        }?;
+
+        if let Some(json) = maybe_json {
+            println!("{} is valid JSON", file);
+            if should_stat {
+                // TODO: implement analysis functions
+            }
+            continue;
         }
+        println!("{} is not valid JSON - SKIP", file);
     }
     Ok(())
-}
-
-
-fn main() -> Result<(), std::io::Error> {
-    let m = cli().get_matches();
-    match m.subcommand() {
-        Some(("check", sub_matches)) => if let Some(arg) = sub_matches.get_one::<String>("JSON") {
-            let argv = [arg.clone()];
-            _main(&argv)
-        } else {
-            Err(std::io::Error::from_raw_os_error(22))
-        },
-        _ => unreachable!()
-    }
 }
