@@ -31,7 +31,7 @@ fn get_next_char() -> char {
     if let Some(symbol) = next {
         return symbol;
     }
-    return '\0';
+    '\0'
 }
 
 fn accept_common(jval: JsonValue, expected: char, should_ignore: bool) -> Result<JsonValue, JsonValue> {
