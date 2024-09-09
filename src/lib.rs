@@ -1,4 +1,5 @@
 pub mod parser;
+pub mod sniffer;
 
 #[cfg(test)]
 mod tests {

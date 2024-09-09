@@ -1,6 +1,7 @@
 use clap::{arg, Command};
 
 use json_stat::parser;
+use json_stat::sniffer;
 
 
 fn cli() -> Command {
@@ -35,6 +36,7 @@ fn main() -> Result<(), std::io::Error> {
         _ => unreachable!()
     }?;
 
+    let argc = files.len();
     for file in files {
         let maybe_json = match parser::single_json(&file) {
             Ok(maybe_value) => Ok(maybe_value),
@@ -47,11 +49,18 @@ fn main() -> Result<(), std::io::Error> {
         if let Some(json) = maybe_json {
             println!("{} is valid JSON", file);
             if should_stat {
-                // TODO: implement analysis functions
+                stats = Some(match stats {
+                    Some(prev) => prev.merge_stats(json),
+                    None => sniffer::JsonComplexTypeStats::from_json(json)
+                });
             }
             continue;
         }
         println!("{} is not valid JSON - SKIP", file);
+    }
+
+    if should_stat {
+        // TODO: print JSON stats
     }
     Ok(())
 }
