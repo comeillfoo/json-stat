@@ -2,7 +2,6 @@ use clap::{arg, Command};
 
 use json_stat::parser;
 use json_stat::sniffer;
-use json_stat::sniffer::print_complex_stats;
 
 
 fn cli() -> Command {
@@ -62,7 +61,7 @@ fn main() -> Result<(), std::io::Error> {
 
     if should_stat {
         if let Some(stats) = maybe_stats {
-            print_complex_stats(stats);
+            sniffer::print_complex_stats(stats);
         } else {
             println!("No stat information collected - SKIP");
         }
