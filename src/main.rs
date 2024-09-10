@@ -33,10 +33,10 @@ fn main() -> Result<(), std::io::Error> {
         Some(("stat", sub_matches)) => if let Some(argv) = sub_matches.get_many::<String>("JSON") {
             Ok((true, argv.into_iter().map(String::clone).collect::<Vec<String>>()))
         } else { Err(std::io::Error::from_raw_os_error(22)) },
-        _ => unreachable!()
+        _ => Err(std::io::Error::from_raw_os_error(22))
     }?;
 
-    let argc = files.len();
+    let mut stats: Option<sniffer::JsonComplexTypeStats> = None;
     for file in files {
         let maybe_json = match parser::single_json(&file) {
             Ok(maybe_value) => Ok(maybe_value),

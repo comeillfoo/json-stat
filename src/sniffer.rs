@@ -49,15 +49,15 @@ enum JsonSpecificTypeStats {
     OBJECT(Box<JsonObjectStats>)
 }
 
-struct JsonComplexTypeStats {
+pub struct JsonComplexTypeStats {
     values_types: HashSet<&'static str>,
     numbers: JsonNumbersStats,
     strings: HashSet<String>,
     type_stats: JsonSpecificTypeStats
 }
 
-fn stringify_json(json: &JsonValue) -> &str {
-    let idx = match json {
+fn json_type(json: &JsonValue) -> usize {
+    match json {
         JsonValue::STRING(_) => 0,
         JsonValue::NUMBER(_) => 1,
         JsonValue::OBJECT(_) => 2,
@@ -66,9 +66,9 @@ fn stringify_json(json: &JsonValue) -> &str {
         JsonValue::FALSE => 5,
         JsonValue::NULL => 6,
         JsonValue::KEYVALUE(_) => 7
-    };
-    JSON_TYPES_NAMES[idx]
+    }
 }
+
 
 fn is_array_type(json: &JsonValue) -> bool {
     match json {
@@ -221,18 +221,20 @@ impl JsonComplexTypeStats {
     pub fn from_object(object: HashMap<String, Box<JsonValue>>) -> Self {
         let mut stats = Self::object();
         for (key, value) in object {
-            stats.values_types.insert(stringify_json(&value));
-            if let JsonSpecificTypeStats::OBJECT(ref mut obj_stats) = stats.type_stats {
-                if is_complex_type(&value) {
+            stats.values_types.insert(JSON_TYPES_NAMES[json_type(&value)]);
+            if is_complex_type(&value) {
+                if let JsonSpecificTypeStats::OBJECT(ref mut obj_stats) = stats.type_stats {
                     let new = match obj_stats.complex_stats.remove(&key) {
                         Some(prev) => prev.merge_stats(*value),
                         None => Self::from_json(*value)
                     };
                     obj_stats.complex_stats.insert(key, new);
-                    continue;
                 }
+                continue;
+            }
+            stats = stats.merge_primitives_stats(*value);
+            if let JsonSpecificTypeStats::OBJECT(ref mut obj_stats) = stats.type_stats {
                 obj_stats.primitives_keys.insert(key);
-                stats.merge_primitives_stats(*value);
             }
         }
         stats
@@ -241,22 +243,21 @@ impl JsonComplexTypeStats {
     pub fn from_array(array: Vec<JsonValue>) -> Self {
         let mut stats = Self::array();
         for value in array {
-            stats.values_types.insert(stringify_json(&value));
-            if let JsonSpecificTypeStats::ARRAY(ref mut arr_stats) = stats.type_stats {
+            stats.values_types.insert(JSON_TYPES_NAMES[json_type(&value)]);
+            stats.type_stats = if let JsonSpecificTypeStats::ARRAY(mut arr_stats) = stats.type_stats {
                 if is_object_type(&value) {
                     arr_stats.inner_objects_stats = Some(match arr_stats.inner_objects_stats {
                         Some(prev) => prev.merge_stats(value),
                         None => Self::from_json(value)
                     });
-                    continue;
-                }
-                if is_array_type(&value) {
+                } else if is_array_type(&value) {
                     arr_stats.inner_arrays_stats = Some(match arr_stats.inner_arrays_stats {
                         Some(prev) => prev.merge_stats(value),
                         None => Self::from_json(value)
                     })
                 }
-            }
+                JsonSpecificTypeStats::ARRAY(arr_stats)
+            } else { stats.type_stats };
         }
         stats
     }
@@ -270,7 +271,7 @@ impl JsonComplexTypeStats {
         if self.is_complex_matches(&value) {
             return self.merge_complex_stats(value);
         }
-        self.values_types.insert(stringify_json(&value));
+        self.values_types.insert(JSON_TYPES_NAMES[json_type(&value)]);
         self.merge_primitives_stats(value)
     }
 
