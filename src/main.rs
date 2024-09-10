@@ -2,6 +2,7 @@ use clap::{arg, Command};
 
 use json_stat::parser;
 use json_stat::sniffer;
+use json_stat::sniffer::print_complex_stats;
 
 
 fn cli() -> Command {
@@ -36,7 +37,7 @@ fn main() -> Result<(), std::io::Error> {
         _ => Err(std::io::Error::from_raw_os_error(22))
     }?;
 
-    let mut stats: Option<sniffer::JsonComplexTypeStats> = None;
+    let mut maybe_stats: Option<sniffer::JsonComplexTypeStats> = None;
     for file in files {
         let maybe_json = match parser::single_json(&file) {
             Ok(maybe_value) => Ok(maybe_value),
@@ -49,7 +50,7 @@ fn main() -> Result<(), std::io::Error> {
         if let Some(json) = maybe_json {
             println!("{} is valid JSON", file);
             if should_stat {
-                stats = Some(match stats {
+                maybe_stats = Some(match maybe_stats {
                     Some(prev) => prev.merge_stats(json),
                     None => sniffer::JsonComplexTypeStats::from_json(json)
                 });
@@ -60,7 +61,11 @@ fn main() -> Result<(), std::io::Error> {
     }
 
     if should_stat {
-        // TODO: print JSON stats
+        if let Some(stats) = maybe_stats {
+            print_complex_stats(stats);
+        } else {
+            println!("No stat information collected - SKIP");
+        }
     }
     Ok(())
 }

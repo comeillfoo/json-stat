@@ -39,7 +39,7 @@ struct JsonArrayStats {
 }
 
 struct JsonObjectStats {
-    primitives_keys: HashSet<String>,
+    primitives_keys: HashMap<String, HashSet<&'static str>>,
     complex_stats: HashMap<String, JsonComplexTypeStats>,
     nonobligatory: HashSet<String>
 }
@@ -125,7 +125,12 @@ fn merge_as_object_stats(mut stats: JsonObjectStats, json_object: JsonValue) -> 
                 stats.complex_stats.insert(key_mold, new);
                 continue;
             }
-            if stats.primitives_keys.insert(key_mold.clone()) {
+            let is_nonobligatory = stats.primitives_keys.contains_key(&key_mold);
+            let primitive_type = JSON_TYPES_NAMES[json_type(value.as_ref())];
+            stats.primitives_keys.entry(key_mold.clone())
+                .and_modify(|types| { types.insert(primitive_type); })
+                .or_insert_with(|| HashSet::from([primitive_type]));
+            if is_nonobligatory {
                 stats.nonobligatory.insert(key_mold.clone());
             }
         }
@@ -180,7 +185,7 @@ impl JsonComplexTypeStats {
             strings: HashSet::new(),
             type_stats: JsonSpecificTypeStats::OBJECT(Box::new(JsonObjectStats {
                 complex_stats: HashMap::new(),
-                primitives_keys: HashSet::new(),
+                primitives_keys: HashMap::new(),
                 nonobligatory: HashSet::new()
             }))
         }
@@ -232,10 +237,13 @@ impl JsonComplexTypeStats {
                 }
                 continue;
             }
-            stats = stats.merge_primitives_stats(*value);
             if let JsonSpecificTypeStats::OBJECT(ref mut obj_stats) = stats.type_stats {
-                obj_stats.primitives_keys.insert(key);
+                let primitive_type = JSON_TYPES_NAMES[json_type(value.as_ref())];
+                obj_stats.primitives_keys.entry(key)
+                    .and_modify(|types| { types.insert(primitive_type); })
+                    .or_insert_with(|| HashSet::from([primitive_type]));
             }
+            stats = stats.merge_primitives_stats(*value);
         }
         stats
     }
@@ -244,20 +252,24 @@ impl JsonComplexTypeStats {
         let mut stats = Self::array();
         for value in array {
             stats.values_types.insert(JSON_TYPES_NAMES[json_type(&value)]);
-            stats.type_stats = if let JsonSpecificTypeStats::ARRAY(mut arr_stats) = stats.type_stats {
-                if is_object_type(&value) {
-                    arr_stats.inner_objects_stats = Some(match arr_stats.inner_objects_stats {
-                        Some(prev) => prev.merge_stats(value),
-                        None => Self::from_json(value)
-                    });
-                } else if is_array_type(&value) {
-                    arr_stats.inner_arrays_stats = Some(match arr_stats.inner_arrays_stats {
-                        Some(prev) => prev.merge_stats(value),
-                        None => Self::from_json(value)
-                    })
-                }
-                JsonSpecificTypeStats::ARRAY(arr_stats)
-            } else { stats.type_stats };
+            if is_complex_type(&value) {
+                stats.type_stats = if let JsonSpecificTypeStats::ARRAY(mut arr_stats) = stats.type_stats {
+                    if is_object_type(&value) {
+                        arr_stats.inner_objects_stats = Some(match arr_stats.inner_objects_stats {
+                            Some(prev) => prev.merge_stats(value),
+                            None => Self::from_json(value)
+                        });
+                    } else if is_array_type(&value) {
+                        arr_stats.inner_arrays_stats = Some(match arr_stats.inner_arrays_stats {
+                            Some(prev) => prev.merge_stats(value),
+                            None => Self::from_json(value)
+                        })
+                    }
+                    JsonSpecificTypeStats::ARRAY(arr_stats)
+                } else { stats.type_stats };
+                continue;
+            }
+            stats = stats.merge_primitives_stats(value);
         }
         stats
     }
@@ -287,3 +299,107 @@ impl JsonComplexTypeStats {
     }
 }
 
+
+fn stringify_complex_stats(specific: &JsonSpecificTypeStats) -> &str {
+    match specific {
+        JsonSpecificTypeStats::ARRAY(_) => "array",
+        JsonSpecificTypeStats::OBJECT(_) => "object"
+    }
+}
+
+pub fn print_complex_stats(mut stats: JsonComplexTypeStats) {
+    println!("Type: {}", stringify_complex_stats(&stats.type_stats));
+    println!("--- Common info ---");
+    print!("Containing types: ");
+    let mut is_not_first = false;
+    for value_type in stats.values_types {
+        if is_not_first { print!(", "); }
+        print!("{}", value_type);
+        is_not_first = true;
+    }
+    if stats.numbers.number > 0 {
+        let avg = stats.numbers.sum / stats.numbers.number as f64;
+        println!("\n=== Numbers info ===");
+        print!("Encountered {} numbers", stats.numbers.number);
+        println!(", sum = {}, avg = {}", stats.numbers.sum, avg);
+        print!("{} most maximum numbers: ", stats.numbers.maximums.len());
+        is_not_first = false;
+        while let Some(wrapped) = stats.numbers.maximums.pop() {
+            if is_not_first { print!(", "); }
+            print!("{}", wrapped.0.0);
+            is_not_first = true;
+
+        }
+        print!("\n{} most minimum numbers: ", stats.numbers.minimums.len());
+        is_not_first = false;
+        while let Some(wrapped) = stats.numbers.minimums.pop() {
+            if is_not_first { print!(", "); }
+            print!("{}", wrapped.0);
+            is_not_first = true;
+        }
+    }
+    if stats.strings.len() > 0 {
+        println!("\n=== Strings info ===");
+        print!("Encountered {} unique strings: ", stats.strings.len());
+        is_not_first = false;
+        for string in stats.strings {
+            if is_not_first { print!(", "); }
+            print!("'{}'", string);
+            is_not_first = true;
+        }
+    }
+    match stats.type_stats {
+        JsonSpecificTypeStats::ARRAY(mut arr_stats) => {
+            println!("\n=== Array specific info ===");
+            let inner_arrays = arr_stats.inner_arrays_stats.take();
+            if let Some(inner_arrays_stats) = inner_arrays {
+                println!("*** Inner arrays info ***");
+                print_complex_stats(inner_arrays_stats);
+            }
+            let inner_objects = arr_stats.inner_objects_stats.take();
+            if let Some(inner_objects_stats) = inner_objects {
+                println!("*** Inner objects info ***");
+                print_complex_stats(inner_objects_stats)
+            }
+        },
+        JsonSpecificTypeStats::OBJECT(obj_stats) => {
+            println!("\n=== Object specific info ===");
+            print!("{} keys are likely nonobligatory: ", obj_stats.nonobligatory.len());
+            is_not_first = false;
+            for key in &obj_stats.nonobligatory {
+                if is_not_first { print!(", "); }
+                print!("'{}'", key);
+                is_not_first = true;
+            }
+
+            let mut mandatory_keys = HashSet::new();
+            for key in obj_stats.primitives_keys.keys().chain(obj_stats.complex_stats.keys()) {
+                mandatory_keys.insert(key.clone());
+            }
+            let mandatory_keys: Vec<_> = mandatory_keys.difference(&obj_stats.nonobligatory).collect();
+            print!("\n{} keys are likely mandatory: ", mandatory_keys.len());
+            is_not_first = false;
+            for key in mandatory_keys {
+                if is_not_first { print!(", "); }
+                print!("'{}'", key);
+                is_not_first = true;
+            }
+            println!("\n{} keys have primitive values:", obj_stats.primitives_keys.len());
+            for (key, types) in obj_stats.primitives_keys {
+                print!("- {} is ", key);
+                is_not_first = false;
+                for type_name in types {
+                    if is_not_first { print!(", "); }
+                    print!("{}", type_name);
+                    is_not_first = true;
+                }
+                println!();
+            }
+            for (key, inner_stats) in obj_stats.complex_stats {
+                println!("*** Info for value at key {} ***", key);
+                print_complex_stats(inner_stats);
+            }
+        }
+    };
+    println!();
+}
